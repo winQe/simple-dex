@@ -6,6 +6,9 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import "./LPToken.sol";
 
+// Debugging purposes
+import "hardhat/console.sol";
+
 error PoolInvalidTokenRatio();
 error PoolZeroLPToken();
 error PoolInvalidToken();
@@ -92,6 +95,10 @@ contract Pool is ReentrancyGuard, LPToken {
         _updateLiquidity(newResA, newResB);
         require(tokenOut.transfer(msg.sender, amountOut), "PoolTransferFailed");
 
+        console.log("Token swap completed, amountOut: ", amountOut);
+        console.log("New reserve A:", newResA);
+        console.log("New reserve B:", newResB);
+
         emit TokensSwapped(
             msg.sender,
             _tokenIn,
@@ -138,6 +145,13 @@ contract Pool is ReentrancyGuard, LPToken {
         // Mint new LPToken
         _mint(msg.sender, liquidityTokensMinted);
         _updateLiquidity(reserveA + amountA, reserveB + amountB);
+
+        console.log(
+            "User added %s TokenA and %s TokenB and gained %s LPToken",
+            amountA,
+            amountB,
+            liquidityTokensMinted
+        );
 
         emit LiquidityAdded(
             msg.sender,
