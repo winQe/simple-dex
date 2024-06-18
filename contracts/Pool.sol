@@ -11,10 +11,9 @@ error PoolZeroLPToken();
 error PoolInvalidToken();
 error PoolTransferFailed();
 
-contract Pool is ReentrancyGuard {
+contract Pool is ReentrancyGuard, LPToken {
     IERC20 private immutable tokenA;
     IERC20 private immutable tokenB;
-    LPToken private immutable lpToken;
 
     uint256 private reserveA;
     uint256 private reserveB;
@@ -49,10 +48,9 @@ contract Pool is ReentrancyGuard {
      * @param _tokenA Address of token A.
      * @param _tokenB Address of token B.
      */
-    constructor(address _tokenA, address _tokenB) {
+    constructor(address _tokenA, address _tokenB) LPToken() {
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
-        lpToken = LPToken();
     }
 
     /**
@@ -131,12 +129,14 @@ contract Pool is ReentrancyGuard {
         // https://hackmd.io/@HaydenAdams/HJ9jLsfTz#Adding-Liquidity
 
         // Initially LP Token minted is equal to sqrt(amountA * amountB)
-        uint256 liquidityTokensMinted = lpToken.totalSupply() > 0
-            ? (amountA * lpToken.totalSupply()) / reserveA
+        uint256 liquidityTokensMinted = totalSupply() > 0
+            ? (amountA * totalSupply()) / reserveA
             : _sqrt(amountA * amountB);
 
         if (liquidityTokensMinted == 0) revert PoolZeroLPToken();
-        lpToken.mint(msg.sender, liquidityTokensMinted);
+
+        // Mint new LPToken
+        _mint(msg.sender, liquidityTokensMinted);
         _updateLiquidity(reserveA + amountA, reserveB + amountB);
 
         emit LiquidityAdded(
@@ -156,7 +156,7 @@ contract Pool is ReentrancyGuard {
             liquidityTokens
         );
 
-        lpToken.burn(msg.sender, liquidityTokens);
+        _burn(msg.sender, liquidityTokens);
         _updateLiquidity(reserveA - amountA, reserveB - amountB);
 
         require(tokenA.transfer(msg.sender, amountA), "PoolTransferFailed");
@@ -178,9 +178,9 @@ contract Pool is ReentrancyGuard {
 
         // Refer to Uniswap white paper for formula
         // https://hackmd.io/@HaydenAdams/HJ9jLsfTz#Removing-Liquidity
-        uint256 totalSupply = lpToken.totalSupply();
-        amountA = (reserveA * liquidityTokens) / totalSupply;
-        amountB = (reserveB * liquidityTokens) / totalSupply;
+        uint256 lpTotalSupply = totalSupply();
+        amountA = (reserveA * liquidityTokens) / lpTotalSupply;
+        amountB = (reserveB * liquidityTokens) / lpTotalSupply;
     }
 
     /**
@@ -214,7 +214,7 @@ contract Pool is ReentrancyGuard {
         // xy - xdy + dxy -dxdy = xy (k=xy)
         // dy(x + dx) = dxy
         // dy = dx y/(x+dx)
-        uint256 amountInWithFee = (amountIn * (10000 - fee)) / 10000;
+        uint256 amountInWithFee = (amountIn * (10000 - FEE)) / 10000;
         uint256 amountOut = (amountInWithFee * resOut) /
             (resIn + amountInWithFee);
         return (amountOut, resIn, resOut, isTokenA);
@@ -225,10 +225,6 @@ contract Pool is ReentrancyGuard {
      * @return reserveA Reserve of token A.
      * @return reserveB Reserve of token B.
      */
-    function getReserves() public view returns (uint256, uint256) {
-        return (reserveA, reserveB);
-    }
-
     function getReserves() public view returns (uint256, uint256) {
         return (reserveA, reserveB);
     }
