@@ -11,15 +11,16 @@ error Pool__ZeroLPToken();
 error Pool__InvalidToken();
 error Pool__TransferFailed();
 
-contract Pool is LPToken, ReentrancyGuard {
-    IERC20 private immutable i_tokenA;
-    IERC20 private immutable i_tokenB;
+contract Pool is ReentrancyGuard {
+    IERC20 private immutable tokenA;
+    IERC20 private immutable tokenB;
+    LPToken private immutable lpToken;
 
     uint256 private reserveA;
     uint256 private reserveB;
 
     // Fee is percentage from 0 to 10,000 (100%)
-    uint8 private constant fee = 30;
+    uint8 private constant FEE = 30;
 
     event AddedLiquidity(
         address indexed provider,
@@ -43,9 +44,10 @@ contract Pool is LPToken, ReentrancyGuard {
         uint256 amountOut
     );
 
-    constructor(address _tokenA, address _tokenB) LPToken("DEXToken", "DEXT") {
-        i_tokenA = IERC20(_tokenA);
-        i_tokenB = IERC20(_tokenB);
+    constructor(address _tokenA, address _tokenB, address _lpToken) {
+        tokenA = IERC20(_tokenA);
+        tokenB = IERC20(_tokenB);
+        lpToken = LPToken(_lpToken);
     }
 
     function _updateLiquidity(uint256 _reserveA, uint256 _reserveB) internal {
@@ -54,7 +56,6 @@ contract Pool is LPToken, ReentrancyGuard {
     }
 
     function swap(address _tokenIn, uint256 amountIn) external nonReentrant {
-        // Get  token out amount
         (
             uint256 amountOut,
             uint256 resIn,
@@ -63,14 +64,14 @@ contract Pool is LPToken, ReentrancyGuard {
         ) = getAmountOut(_tokenIn, amountIn);
 
         IERC20 tokenIn = IERC20(_tokenIn);
-        IERC20 tokenOut = isTokenA ? i_tokenB : i_tokenA;
+        IERC20 tokenOut = isTokenA ? tokenB : tokenA;
 
         require(
             tokenIn.transferFrom(msg.sender, address(this), amountIn),
             "Pool__TransferFailed"
         );
 
-        // Update reserves
+        // Update Reserves with new amount
         (uint256 newResA, uint256 newResB) = isTokenA
             ? (resIn + amountIn, resOut - amountOut)
             : (resOut - amountOut, resIn + amountIn);
@@ -94,29 +95,30 @@ contract Pool is LPToken, ReentrancyGuard {
         uint256 amountA,
         uint256 amountB
     ) external nonReentrant {
-        // x/y = dx/dy
+        // Price * Quantity = constant
         if (reserveA > 0 || reserveB > 0) {
             if (reserveA * amountB != reserveB * amountA)
                 revert Pool__InvalidTokenRatio();
         }
 
-        IERC20 tokenA = i_tokenA;
-        IERC20 tokenB = i_tokenB;
+        IERC20 tokenAInstance = tokenA;
+        IERC20 tokenBInstance = tokenB;
 
         require(
-            tokenA.transferFrom(msg.sender, address(this), amountA),
+            tokenAInstance.transferFrom(msg.sender, address(this), amountA),
             "Pool__TransferFailed"
         );
         require(
-            tokenB.transferFrom(msg.sender, address(this), amountB),
+            tokenBInstance.transferFrom(msg.sender, address(this), amountB),
             "Pool__TransferFailed"
         );
 
-        // https://hackmd.io/@HaydenAdams/HJ9jLsfTz#Providing-Liquidity
+        // Refer to Uniswap Whitepaper for formulas
+        // https://hackmd.io/@HaydenAdams/HJ9jLsfTz#Adding-Liquidity
 
-        // Initially tokens minted will be sqrt(amountOfTokenA * amountOfTokenB)
-        uint256 liquidityTokensMinted = totalSupply() > 0
-            ? (amountA * totalSupply()) / reserveA
+        // Initially LP Token minted is equal to sqrt(amountA * amountB)
+        uint256 liquidityTokensMinted = lpToken.totalSupply() > 0
+            ? (amountA * lpToken.totalSupply()) / reserveA
             : _sqrt(amountA * amountB);
 
         if (liquidityTokensMinted == 0) revert Pool__ZeroLPToken();
@@ -136,14 +138,20 @@ contract Pool is LPToken, ReentrancyGuard {
             liquidityTokens
         );
 
-        _burn(msg.sender, liquidityTokens);
+        lpToken.burn(msg.sender, liquidityTokens);
         _updateLiquidity(reserveA - amountA, reserveB - amountB);
 
-        IERC20 tokenA = i_tokenA;
-        IERC20 tokenB = i_tokenB;
+        IERC20 tokenAInstance = tokenA;
+        IERC20 tokenBInstance = tokenB;
 
-        require(tokenA.transfer(msg.sender, amountA), "Pool__TransferFailed");
-        require(tokenB.transfer(msg.sender, amountB), "Pool__TransferFailed");
+        require(
+            tokenAInstance.transfer(msg.sender, amountA),
+            "Pool__TransferFailed"
+        );
+        require(
+            tokenBInstance.transfer(msg.sender, amountB),
+            "Pool__TransferFailed"
+        );
 
         emit RemovedLiquidity(msg.sender, liquidityTokens, amountA, amountB);
     }
@@ -153,7 +161,9 @@ contract Pool is LPToken, ReentrancyGuard {
     ) public view returns (uint256 amountA, uint256 amountB) {
         require(liquidityTokens > 0, "0 Liquidity Tokens");
 
-        uint256 totalSupply = totalSupply();
+        // Refer to Uniswap white paper for formula
+        // https://hackmd.io/@HaydenAdams/HJ9jLsfTz#Removing-Liquidity
+        uint256 totalSupply = lpToken.totalSupply();
         amountA = (reserveA * liquidityTokens) / totalSupply;
         amountB = (reserveB * liquidityTokens) / totalSupply;
     }
@@ -164,11 +174,11 @@ contract Pool is LPToken, ReentrancyGuard {
     ) public view returns (uint256, uint256, uint256, bool) {
         // Check whether token is part of this LP
         require(
-            _tokenIn == address(i_tokenA) || _tokenIn == address(i_tokenB),
+            _tokenIn == address(tokenA) || _tokenIn == address(tokenB),
             "Pool__InvalidToken"
         );
 
-        bool isTokenA = _tokenIn == address(i_tokenA);
+        bool isTokenA = _tokenIn == address(tokenA);
 
         // Fetching reserves
         (uint256 resIn, uint256 resOut) = isTokenA
@@ -179,7 +189,7 @@ contract Pool is LPToken, ReentrancyGuard {
         // (x + dx)(y - dy) = k
         // xy - xdy + dxy -dxdy = xy (k=xy)
         // dy(x + dx) = dxy
-        // dy = dxy/(x+dx)
+        // dy = dx y/(x+dx)
         uint256 amountInWithFee = (amountIn * (10000 - fee)) / 10000;
         uint256 amountOut = (amountInWithFee * resOut) /
             (resIn + amountInWithFee);
@@ -191,13 +201,14 @@ contract Pool is LPToken, ReentrancyGuard {
     }
 
     function getTokens() public view returns (address, address) {
-        return (address(i_tokenA), address(i_tokenB));
+        return (address(tokenA), address(tokenB));
     }
 
     function getFee() external pure returns (uint8) {
-        return fee;
+        return FEE;
     }
 
+    // Square Root implementation for Solidity
     function _sqrt(uint256 y) private pure returns (uint256 z) {
         if (y > 3) {
             z = y;
