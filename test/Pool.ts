@@ -83,4 +83,26 @@ describe("Pool", function () {
     const expectedAbc = 19937;
     expect(await abcToken.balanceOf(otherUser)).to.equal(expectedAbc);
   });
+
+  it("Should remove liquidity", async function () {
+    const { pool, abcToken, defToken, user, otherUser } = await loadFixture(
+      deployFixture
+    );
+
+    // Fund the test user account
+    await abcToken.transfer(otherUser.address, 20000);
+    await defToken.transfer(otherUser.address, 20000);
+
+    // Approve the pool contract to spend tokens on behalf of the user
+    await abcToken.connect(otherUser).approve(pool, 20000);
+    await defToken.connect(otherUser).approve(pool, 20000);
+
+    await pool.connect(otherUser).addLiquidity(20000, 20000);
+    expect(await abcToken.balanceOf(otherUser)).to.equal(0);
+    expect(await defToken.balanceOf(otherUser)).to.equal(0);
+
+    await pool.connect(otherUser).removeLiquidity(20000);
+    expect(await abcToken.balanceOf(otherUser)).to.equal(20000);
+    expect(await defToken.balanceOf(otherUser)).to.equal(20000);
+  });
 });
